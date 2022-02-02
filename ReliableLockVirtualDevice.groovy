@@ -21,6 +21,7 @@ metadata {
 		capability "Sensor"
         capability "Actuator"
 		capability "Lock"
+        capability "Lock Codes"
         capability "Battery"
 		
 		command "markAsLocked"
@@ -91,6 +92,27 @@ def unlock() {
 	parent.unlockWrappedLock()
 }
 
+def setCode(codeNumber, code, name = null) {
+    log "${device.displayName}.setCode(${codeNumber}, ${code}, ${name})"
+    
+	def parent = getParent()
+	if (parent == null) {
+		return
+	}
+	
+	parent.setCodeWrappedLock(codeNumber, code, name)
+}
+
+def deleteCode(codeNumber) {
+    log "${device.displayName}.deleteCode(${codeNumber})"
+    
+	def parent = getParent()
+	if (parent == null) {
+		return
+	}
+	
+	parent.deleteCodeWrappedLock(codeNumber)
+}
 
 // Mark as locked without sending the event back to the parent app.  Called when the physical lock has locked, to prevent cyclical firings.
 def markAsLocked() {
@@ -107,6 +129,17 @@ def markAsUnlocked() {
 	sendEvent(name: "lock", value: "unlocked")
 }
 
+def markAsSetCode(codeNumber, code, name) {
+    log "${device.displayName}.markAsSetCode()"
+    
+    sendEvent(name:"codeChanged", value:"added", data:null, isStateChange: true)
+}
+
+def markAsDeleteCode(codeNumber, code, name) {
+    log "${device.displayName}.markAsDeleteCode()"
+    
+    sendEvent(name:"codeChanged", value:"deleted", data:null, isStateChange: true)
+}
 
 def setBattery(val) {
     if (val != null) {

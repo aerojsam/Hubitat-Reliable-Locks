@@ -118,6 +118,7 @@ def initialize() {
 	def reliableLock = getChildDevice("Reliable-${wrappedLock.displayName}")
 	
 	subscribe(wrappedLock, "lock", wrappedLockHandler)
+    subscribe(wrappedLock, "codeChanged", wrappedLockCodeHandler)
     subscribe(wrappedLock, "battery", batteryHandler)
 
 	// Generate a label for this child app
@@ -171,6 +172,32 @@ def unlockWrappedLock() {
 	runIn(refreshTime, refreshWrappedLockAndRetryIfNecessary)
 }
 
+def setCodeWrappedLock(codeNumber, code, name = null) {
+    def reliableLock = getChildDevice("Reliable-${wrappedLock.displayName}")
+
+    log "${reliableLock.displayName}:setCode detected"
+	log "${wrappedLock.displayName}:setCode"
+
+    wrappedLock.setCode(codeNumber, code, name)
+    
+    state.desiredLockCodeState = "added"
+    state.retryLockCodeCount = 0
+    
+    runIn(refreshTime, refreshWrappedLockCodeAndRetryIfNecessary, [data: [codeNumber:codeNumber, code:code, name:name]])
+}
+
+def deleteCodeWrappedLock(codeNumber) {
+    def reliableLock = getChildDevice("Reliable-${wrappedLock.displayName}")
+
+    log "${reliableLock.displayName}:deleteCode detected"
+	log "${wrappedLock.displayName}:deleteCode"
+    wrappedLock.deleteCode(codeNumber)
+    
+    state.desiredLockCodeState = "deleted"
+    state.retryLockCodeCount = 0
+    
+    runIn(refreshTime, refreshWrappedLockCodeAndRetryIfNecessary, [data: [codeNumber:codeNumber, code:null, name:null]])
+}
 
 def refreshWrappedLock() {
 	log "${wrappedLock.displayName}:refreshing"
@@ -184,6 +211,15 @@ def refreshWrappedLockAndRetryIfNecessary() {
     
     if (retryLockCommands) {
         runIn(5, retryIfCommandNotFollowed)
+    }
+}
+
+def refreshWrappedLockCodeAndRetryIfNecessary(data) {
+	log "${wrappedLock.displayName}:refreshing LockCode"
+	wrappedLock.refresh()
+    
+    if (retryLockCommands) {
+        runIn(5, retryIfCodeCommandNotFollowed, [data: data])
     }
 }
 
@@ -220,6 +256,38 @@ def retryIfCommandNotFollowed() {
     }
 }
 
+def retryIfCodeCommandNotFollowed(data) {
+    log "${wrappedLock.displayName}:retryIfCodeCommandNotFollowed"
+    
+    // Check if the command had been followed.
+    def commandWasFollowed = wrappedLock.currentValue("codeChanged") == state.desiredLockCodeState
+    
+    if (!commandWasFollowed) {
+        log "Command was not followed. RetryLockCodeCount is ${state.retryLockCodeCount}."
+        
+        // Check if we have exceeded 2 retries.
+        if (state.retryLockCodeCount < 2) {
+            // If we still need to retry, fire off setCodeWrappedLock or deleteCodeWrappedLock again.
+            state.retryLockCodeCount = state.retryLockCodeCount + 1
+            if (state.desiredLockCodeState == "added") {
+                log "${wrappedLock.displayName}:setCode(${data.codeNumber}, ${data.code}, ${data.name})"
+	            wrappedLock.setCode(data.codeNumber, data.code, data.name)
+            }
+            else {
+                log "${wrappedLock.displayName}:deleteCode(${data.codeNumber})"
+	            wrappedLock.deleteCode(data.codeNumber)
+            }
+            runIn(refreshTime, refreshWrappedLockCodeAndRetryIfNecessary, [data: data])
+        }
+        else {
+            if (notificationDevice) {
+                def commandText = state.desiredLockCodeState == "added" ? "Set Code" : "Delete Code"
+                notificationDevice.deviceNotification("${wrappedLock.displayName} did not respond to repeated retries of the '${commandText}' command.")
+            }
+        }
+    }
+}
+
 
 def wrappedLockHandler(evt) {
 	def reliableLock = getChildDevice("Reliable-${wrappedLock.displayName}")
@@ -238,6 +306,26 @@ def wrappedLockHandler(evt) {
 	}
 }
 
+def wrappedLockCodeHandler(evt) {
+	def reliableLock = getChildDevice("Reliable-${wrappedLock.displayName}")
+    def lockCodeData = evt.jsonData
+    def codeNumber = lockCodeData.keySet()[0]
+    def code = lockCodeData.get(codeNumber).code
+    def name = lockCodeData.get(codeNumber).name
+
+	if (wrappedLock.currentValue("codeChanged") == "added") {
+		log "${wrappedLock.displayName}:codeChanged added detected"
+		log "${reliableLock.displayName}:setting setCode"
+		reliableLock.markAsSetCode(codeNumber, code, name)
+        state.desiredLockState = "added"
+	}
+	else {
+		log "${wrappedLock.displayName}:codeChanged deleted detected"
+		log "${reliableLock.displayName}:setting deleteCode"
+		reliableLock.markAsDeleteCode(codeNumber, code, name)
+        state.desiredLockState = "deleted"
+	}
+}
 
 def batteryHandler(evt) {
 	def reliableLock = getChildDevice("Reliable-${wrappedLock.displayName}")
