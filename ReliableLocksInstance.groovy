@@ -260,7 +260,36 @@ def retryIfCodeCommandNotFollowed(data) {
     log "${wrappedLock.displayName}:retryIfCodeCommandNotFollowed"
     
     // Check if the command had been followed.
-    def commandWasFollowed = wrappedLock.currentValue("codeChanged") == state.desiredLockCodeState
+    def commandWasFollowed = false
+    Map lockCodes = getLockCodes(wrappedLock)
+    log "lockCodes- ${lockCodes}"
+    Map codeMap = getCodeMap(lockCodes, data.codeNumber)
+    
+    // Check validity only when "added" is desired, because for deleteCode, no code or name is provided
+    if (state.desiredLockCodeState == "added") {
+        if (!changeIsValid(wrappedLock, lockCodes, codeMap, data.codeNumber, data.code, data.name)) return
+    }
+    
+   	Map newMapData = [:]
+    String value
+    
+    // if it exists, update if different, else, create.
+    if (codeMap) {
+        if (codeMap.name != data.name || codeMap.code != data.code) {
+            codeMap = ["name":"${data.name}", "code":"${data.code}"]
+            lockCodes."${data.codeNumber}" = codeMap
+            newMapData = ["${codeNumber}":codeMap]
+            value = "changed"
+        } else {
+            commandWasFollowed = true
+            updateLockCodes(lockCodes)
+        }
+    } else {
+        codeMap = ["name":"${name}", "code":"${code}"]
+        newMapData = ["${codeNumber}":codeMap]
+        lockCodes << newMapData
+        value = "added"
+    }
     
     if (!commandWasFollowed) {
         log "Command was not followed. RetryLockCodeCount is ${state.retryLockCodeCount}."
@@ -356,5 +385,67 @@ def log(msg) {
 		log.debug(msg)	
 	}
 }
+
+/*>> LOCK CODE HELPERS >>*/
+Map getCodeMap(lockCodes, codeNumber){
+    Map codeMap = [:]
+    Map lockCode = lockCodes?."${codeNumber}"
+    if (lockCode) {
+        codeMap = ["name":"${lockCode.name}", "code":"${lockCode.code}"]
+    }
+    return codeMap
+}
+
+Map getLockCodes(wrappedLock) {
+    /*
+	on a real lock we would fetch these from the response to a userCode report request
+	*/
+    String lockCodes = wrappedLock.currentValue("lockCodes")
+    Map result = [:]
+    if (lockCodes) {
+        result = new JsonSlurper().parseText(lockCodes)
+    }
+    return result
+}
+
+Boolean changeIsValid(wrappedLock, lockCodes, codeMap, codeNumber, code, name){
+    //validate proposed lockCode change
+    Boolean result = true
+    Integer maxCodeLength = wrappedLock.currentValue("codeLength")?.toInteger() ?: 4
+    Integer maxCodes = wrappedLock.currentValue("maxCodes")?.toInteger() ?: 20
+    Boolean isBadLength = code.size() > maxCodeLength
+    Boolean isBadCodeNum = maxCodes < codeNumber
+    if (lockCodes) {
+        List nameSet = lockCodes.collect{ it.value.name }
+        List codeSet = lockCodes.collect{ it.value.code }
+        if (codeMap) {
+            nameSet = nameSet.findAll{ it != codeMap.name }
+            codeSet = codeSet.findAll{ it != codeMap.code }
+        }
+        Boolean nameInUse = name in nameSet
+        Boolean codeInUse = code in codeSet
+        if (nameInUse || codeInUse) {
+            if (nameInUse) { log.warn "changeIsValid:false, name:${name} is in use:${ lockCodes.find{ it.value.name == "${name}" } }" }
+            if (codeInUse) { log.warn "changeIsValid:false, code:${code} is in use:${ lockCodes.find{ it.value.code == "${code}" } }" }
+            result = false
+        }
+    }
+    if (isBadLength || isBadCodeNum) {
+        if (isBadLength) { log.warn "changeIsValid:false, length of code ${code} does not match codeLength of ${maxCodeLength}" }
+        if (isBadCodeNum) { log.warn "changeIsValid:false, codeNumber ${codeNumber} is larger than maxCodes of ${maxCodes}" }
+        result = false
+    }
+    return result
+}
+
+void updateLockCodes(lockCodes){
+    /*
+	whenever a code changes we update the lockCodes event
+	*/
+    log "updateLockCodes: ${lockCodes}"
+    String strCodes = JsonOutput.toJson(lockCodes)
+    sendEvent(name:"lockCodes", value:strCodes, isStateChange:true)
+}
+/*<< LOCK CODE HELPERS <<*/
 
 
