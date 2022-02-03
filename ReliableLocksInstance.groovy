@@ -294,8 +294,8 @@ def retryIfCodeCommandNotFollowed(data) {
     if (!commandWasFollowed) {
         log "Command was not followed. RetryLockCodeCount is ${state.retryLockCodeCount}."
         
-        // Check if we have exceeded 2 retries.
-        if (state.retryLockCodeCount < 2) {
+        // Check if we have exceeded 5 retries.
+        if (state.retryLockCodeCount < 5) {
             // If we still need to retry, fire off setCodeWrappedLock or deleteCodeWrappedLock again.
             state.retryLockCodeCount = state.retryLockCodeCount + 1
             if (state.desiredLockCodeState == "added") {
